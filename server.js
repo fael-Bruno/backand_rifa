@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 import pkg from "pg";
 import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
 
 dotenv.config();
 const { Pool } = pkg;
@@ -10,6 +12,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Config PostgreSQL
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
@@ -70,6 +73,27 @@ app.get("/compras", async (req, res) => {
     res.status(500).json({ error: "Erro ao buscar compras", details: err.message });
   }
 });
+
+// ============================
+// ✅ Servir frontend (HTML)
+// ============================
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Servir arquivos estáticos
+app.use(express.static(__dirname));
+
+// Rota raiz → index.html
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "index.html"));
+});
+
+// Rota admin → admin.html
+app.get("/admin", (req, res) => {
+  res.sendFile(path.join(__dirname, "admin.html"));
+});
+
+// ============================
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

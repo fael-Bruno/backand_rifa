@@ -72,6 +72,16 @@ app.get("/compras", async (req, res) => {
   }
 });
 
+// ✅ Rota de status (teste)
+app.get("/status", (req, res) => {
+  res.json({ status: "API online 🚀" });
+});
+
+// ✅ Rota raiz amigável
+app.get("/", (req, res) => {
+  res.send("🎉 Backend da Rifa está rodando! Use /status para verificar a API.");
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Servidor API rodando na porta ${PORT}`);

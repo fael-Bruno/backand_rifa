@@ -2,8 +2,6 @@ import express from "express";
 import cors from "cors";
 import pkg from "pg";
 import dotenv from "dotenv";
-import path from "path";
-import { fileURLToPath } from "url";
 
 dotenv.config();
 const { Pool } = pkg;
@@ -57,7 +55,7 @@ app.post("/comprar", async (req, res) => {
   }
 });
 
-// ✅ Rota para listar compras (para admin.html)
+// ✅ Rota para listar compras (para admin)
 app.get("/compras", async (req, res) => {
   try {
     const result = await pool.query(`
@@ -74,28 +72,7 @@ app.get("/compras", async (req, res) => {
   }
 });
 
-// ============================
-// ✅ Servir frontend (HTML)
-// ============================
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Servir arquivos estáticos
-app.use(express.static(__dirname));
-
-// Rota raiz → index.html
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "index.html"));
-});
-
-// Rota admin → admin.html
-app.get("/admin", (req, res) => {
-  res.sendFile(path.join(__dirname, "admin.html"));
-});
-
-// ============================
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+  console.log(`🚀 Servidor API rodando na porta ${PORT}`);
 });

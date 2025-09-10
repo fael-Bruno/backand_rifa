@@ -18,11 +18,11 @@ const pool = new Pool({
 // ✅ Rota para listar os nomes
 app.get("/nomes", async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM nomes ORDER BY id ASC");
+    const result = await pool.query("SELECT * FROM public.nomes ORDER BY id ASC");
     res.json(result.rows);
   } catch (err) {
-    console.error("Erro ao buscar nomes:", err);
-    res.status(500).json({ error: "Erro ao buscar nomes" });
+    console.error("❌ Erro ao buscar nomes:", err.message);
+    res.status(500).json({ error: "Erro ao buscar nomes", details: err.message });
   }
 });
 
@@ -31,30 +31,47 @@ app.post("/comprar", async (req, res) => {
   const { nomeId, usuarioNome, telefone } = req.body;
 
   try {
-    // Cria usuário (se não existir)
+    // Criar usuário
     const userResult = await pool.query(
-      "INSERT INTO usuarios (nome, telefone) VALUES ($1, $2) RETURNING id",
+      "INSERT INTO public.usuarios (nome, telefone) VALUES ($1, $2) RETURNING id",
       [usuarioNome, telefone]
     );
     const usuarioId = userResult.rows[0].id;
 
-    // Marca nome como indisponível
-    await pool.query("UPDATE nomes SET disponivel = false WHERE id = $1", [nomeId]);
+    // Marcar nome como indisponível
+    await pool.query("UPDATE public.nomes SET disponivel = false WHERE id = $1", [nomeId]);
 
-    // Registra compra
+    // Registrar compra
     const compra = await pool.query(
-      "INSERT INTO compras (usuario_id, nome_id, status) VALUES ($1, $2, 'Pendente') RETURNING *",
+      "INSERT INTO public.compras (usuario_id, nome_id, status) VALUES ($1, $2, 'Pendente') RETURNING *",
       [usuarioId, nomeId]
     );
 
     res.json(compra.rows[0]);
   } catch (err) {
-    console.error("Erro ao registrar compra:", err);
-    res.status(500).json({ error: "Erro ao registrar compra" });
+    console.error("❌ Erro ao registrar compra:", err.message);
+    res.status(500).json({ error: "Erro ao registrar compra", details: err.message });
+  }
+});
+
+// ✅ Rota para listar compras (para admin.html)
+app.get("/compras", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT c.id, u.nome AS usuario, u.telefone, n.nome AS nome_rifa, c.status, c.criado_em
+      FROM public.compras c
+      JOIN public.usuarios u ON c.usuario_id = u.id
+      JOIN public.nomes n ON c.nome_id = n.id
+      ORDER BY c.criado_em DESC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Erro ao buscar compras:", err.message);
+    res.status(500).json({ error: "Erro ao buscar compras", details: err.message });
   }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });

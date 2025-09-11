@@ -17,7 +17,7 @@ const pool = new Pool({
     : false
 });
 
-// cria tabelas caso não existam
+// ---------------- CRIAR TABELAS ----------------
 async function criarTabelas() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS config (
@@ -64,8 +64,19 @@ async function criarTabelas() {
 }
 await criarTabelas();
 
-// ---------------- ADMIN ----------------
+// ---------------- GARANTIR PREMIADO ----------------
+async function garantirPremiado() {
+  const r = await pool.query("SELECT COUNT(*) FROM nomes WHERE premiado = true");
+  if (parseInt(r.rows[0].count) === 0) {
+    await pool.query(`
+      UPDATE nomes SET premiado = true
+      WHERE id = (SELECT id FROM nomes ORDER BY RANDOM() LIMIT 1)
+    `);
+    console.log("✅ Nome premiado escolhido aleatoriamente");
+  }
+}
 
+// ---------------- LOGIN ADMIN ----------------
 app.post("/admin/login", async (req, res) => {
   const { email, senha } = req.body;
   try {
@@ -78,7 +89,6 @@ app.post("/admin/login", async (req, res) => {
 });
 
 // ---------------- CONFIG ----------------
-
 app.get("/config", async (req, res) => {
   try {
     const r = await pool.query("SELECT valor_rifa, premio FROM config LIMIT 1");
@@ -86,8 +96,8 @@ app.get("/config", async (req, res) => {
 
     const cfg = r.rows[0];
     res.json({
-      valor_rifa: parseFloat(cfg.valor_rifa),
-      premio: parseFloat(cfg.premio)
+      valor_rifa: parseFloat(cfg.valor_rifa) || 0,
+      premio: parseFloat(cfg.premio) || 0
     });
   } catch (err) {
     res.status(500).json({ error: "Erro ao buscar configuração", details: err.message });
@@ -97,8 +107,8 @@ app.get("/config", async (req, res) => {
 app.post("/config", async (req, res) => {
   let { valor, premio } = req.body;
 
-  valor = valor !== undefined && !isNaN(valor) ? Number(valor) : null;
-  premio = premio !== undefined && !isNaN(premio) ? Number(premio) : null;
+  valor = valor !== undefined && valor !== null && valor !== "" && !isNaN(valor) ? Number(valor) : null;
+  premio = premio !== undefined && premio !== null && premio !== "" && !isNaN(premio) ? Number(premio) : null;
 
   if (valor === null && premio === null)
     return res.status(400).json({ error: "Nenhum valor enviado" });
@@ -106,7 +116,10 @@ app.post("/config", async (req, res) => {
   try {
     const atual = await pool.query("SELECT id FROM config LIMIT 1");
     if (atual.rowCount === 0) {
-      await pool.query("INSERT INTO config (valor_rifa, premio) VALUES ($1,$2)", [valor ?? 10, premio ?? 5000]);
+      await pool.query(
+        "INSERT INTO config (valor_rifa, premio) VALUES ($1,$2)",
+        [valor ?? 10.0, premio ?? 5000.0]
+      );
     } else {
       await pool.query(
         `UPDATE config SET
@@ -122,14 +135,29 @@ app.post("/config", async (req, res) => {
   }
 });
 
-// ---------------- NOMES/PEDIDOS ----------------
-
+// ---------------- NOMES / PEDIDOS ----------------
 app.get("/nomes", async (req, res) => {
   try {
     const r = await pool.query("SELECT * FROM nomes ORDER BY id");
     res.json(r.rows);
   } catch (err) {
     res.status(500).json({ error: "Erro ao buscar nomes", details: err.message });
+  }
+});
+
+app.post("/comprar", async (req, res) => {
+  const { nomeId, usuarioNome, telefone } = req.body;
+  if (!nomeId || !usuarioNome || !telefone)
+    return res.status(400).json({ error: "Campos obrigatórios faltando" });
+
+  try {
+    await pool.query(
+      "INSERT INTO pedidos (nome_id, cliente_nome, telefone) VALUES ($1,$2,$3)",
+      [nomeId, usuarioNome, telefone]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao registrar compra", details: err.message });
   }
 });
 
@@ -165,6 +193,35 @@ app.post("/cancelar", async (req, res) => {
     res.status(500).json({ error: "Erro ao cancelar", details: err.message });
   }
 });
+
+// ---------------- SORTEIO ----------------
+app.get("/sorteio", async (req, res) => {
+  try {
+    const vendidos = await pool.query("SELECT COUNT(*) FROM nomes WHERE status = 'vendido'");
+    const total = await pool.query("SELECT COUNT(*) FROM nomes");
+    if (parseInt(vendidos.rows[0].count) < parseInt(total.rows[0].count)) {
+      return res.status(400).json({ error: "Ainda há nomes não vendidos" });
+    }
+
+    const r = await pool.query(`
+      SELECT n.nome, p.cliente_nome, p.telefone
+      FROM nomes n
+      JOIN pedidos p ON p.nome_id = n.id
+      WHERE n.premiado = true
+      LIMIT 1
+    `);
+
+    if (r.rowCount === 0)
+      return res.status(404).json({ error: "Nenhum nome premiado encontrado" });
+
+    res.json(r.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao buscar ganhador", details: err.message });
+  }
+});
+
+// ---------------- START ----------------
+await garantirPremiado();
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Servidor rodando na porta " + PORT));

@@ -102,7 +102,6 @@ app.post("/admin/login", async (req, res) => {
 function parseNumberInput(v) {
   if (v === undefined || v === null) return null;
   if (typeof v === "string") {
-    // remove espaços e troca vírgula por ponto
     const s = v.replace(/\s/g, "").replace(",", ".");
     const n = parseFloat(s);
     return Number.isFinite(n) ? n : null;
@@ -114,7 +113,9 @@ function parseNumberInput(v) {
 app.get("/config", async (req, res) => {
   try {
     const r = await pool.query("SELECT valor_rifa, premio FROM config LIMIT 1");
-    if (r.rowCount === 0) return res.status(404).json({ error: "Configuração não encontrada" });
+    if (r.rowCount === 0) {
+      return res.json({ valor_rifa: 0, premio: 0 });
+    }
     const cfg = r.rows[0];
     res.json({
       valor_rifa: parseFloat(cfg.valor_rifa) || 0,
@@ -129,26 +130,26 @@ app.post("/config", async (req, res) => {
   try {
     let { valor, premio } = req.body;
 
-    // aceita strings com vírgula, números etc
     valor = parseNumberInput(valor);
     premio = parseNumberInput(premio);
 
-    if (valor === null && premio === null) {
-      return res.status(400).json({ error: "Nenhum valor enviado" });
+    if (valor === null || premio === null) {
+      return res.status(400).json({ error: "Valores inválidos" });
     }
 
     const atual = await pool.query("SELECT id FROM config LIMIT 1");
     if (atual.rowCount === 0) {
-      await pool.query("INSERT INTO config (valor_rifa, premio) VALUES ($1,$2)", [valor ?? 10.0, premio ?? 5000.0]);
+      await pool.query(
+        "INSERT INTO config (valor_rifa, premio) VALUES ($1,$2)",
+        [valor, premio]
+      );
     } else {
       await pool.query(
-        `UPDATE config SET
-          valor_rifa = COALESCE($1, valor_rifa),
-          premio = COALESCE($2, premio)
-         WHERE id = $3`,
+        "UPDATE config SET valor_rifa=$1, premio=$2 WHERE id=$3",
         [valor, premio, atual.rows[0].id]
       );
     }
+
     res.json({ success: true });
   } catch (err) {
     console.error("Erro POST /config:", err.message);
@@ -173,7 +174,6 @@ app.post("/comprar", async (req, res) => {
 
   try {
     await pool.query("INSERT INTO pedidos (nome_id, cliente_nome, telefone) VALUES ($1,$2,$3)", [nomeId, usuarioNome, telefone]);
-    // marca como reservado para evitar compra paralela (opcional)
     await pool.query("UPDATE nomes SET status = 'reservado' WHERE id = $1", [nomeId]);
     res.json({ success: true });
   } catch (err) {
@@ -221,7 +221,6 @@ app.post("/cancelar", async (req, res) => {
 // ---------------- SORTEIO ----------------
 app.get("/sorteio", async (req, res) => {
   try {
-    // só permite sorteio se todos vendidos
     const vendidos = await pool.query("SELECT COUNT(*) FROM nomes WHERE status = 'vendido'");
     const total = await pool.query("SELECT COUNT(*) FROM nomes");
     if (parseInt(vendidos.rows[0].count) < parseInt(total.rows[0].count)) {
@@ -248,7 +247,6 @@ app.post("/resetar", async (req, res) => {
   try {
     await pool.query("DELETE FROM pedidos");
     await pool.query("UPDATE nomes SET status = NULL, premiado = FALSE");
-    // escolhe novo premiado
     await pool.query(`
       UPDATE nomes SET premiado = true
       WHERE id = (SELECT id FROM nomes ORDER BY RANDOM() LIMIT 1)

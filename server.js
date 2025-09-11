@@ -10,20 +10,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// conexão com o banco
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false } // necessário para o Render
+  ssl: { rejectUnauthorized: false }
 });
 
-// ---------------------- ROTAS ADMIN ----------------------
+// ---------------------- ADMIN ----------------------
 
-// Cadastro de admin
 app.post("/admin/cadastrar", async (req, res) => {
   const { email, senha } = req.body;
-  if (!email || !senha) {
-    return res.status(400).json({ error: "Email e senha são obrigatórios" });
-  }
+  if (!email || !senha) return res.status(400).json({ error: "Email e senha são obrigatórios" });
 
   try {
     const result = await pool.query(
@@ -36,32 +32,24 @@ app.post("/admin/cadastrar", async (req, res) => {
   }
 });
 
-// Login de admin
 app.post("/admin/login", async (req, res) => {
   const { email, senha } = req.body;
-  if (!email || !senha) {
-    return res.status(400).json({ error: "Email e senha obrigatórios" });
-  }
+  if (!email || !senha) return res.status(400).json({ error: "Email e senha obrigatórios" });
 
   try {
     const result = await pool.query(
       "SELECT * FROM admins WHERE email = $1 AND senha = $2",
       [email, senha]
     );
-
-    if (result.rowCount === 0) {
-      return res.status(401).json({ error: "Email ou senha incorretos" });
-    }
-
-    res.json({ success: true, message: "Login bem-sucedido" });
+    if (result.rowCount === 0) return res.status(401).json({ error: "Email ou senha incorretos" });
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: "Erro ao logar admin", details: err.message });
   }
 });
 
-// ---------------------- ROTAS RIFA ----------------------
+// ---------------------- RIFA ----------------------
 
-// Buscar todos os nomes
 app.get("/nomes", async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM nomes ORDER BY id ASC");
@@ -71,7 +59,6 @@ app.get("/nomes", async (req, res) => {
   }
 });
 
-// Reservar um nome
 app.post("/reservar", async (req, res) => {
   const { nomeId } = req.body;
   if (!nomeId) return res.status(400).json({ error: "nomeId é obrigatório" });
@@ -84,16 +71,14 @@ app.post("/reservar", async (req, res) => {
   }
 });
 
-// Criar pedido (registrar compra)
 app.post("/comprar", async (req, res) => {
   const { nomeId, usuarioNome, telefone } = req.body;
-  if (!nomeId || !usuarioNome || !telefone) {
+  if (!nomeId || !usuarioNome || !telefone)
     return res.status(400).json({ error: "Campos obrigatórios faltando" });
-  }
 
   try {
     await pool.query(
-      "INSERT INTO pedidos (nome_id, cliente_nome, telefone) VALUES ($1, $2, $3)",
+      "INSERT INTO pedidos (nome_id, cliente_nome, telefone) VALUES ($1,$2,$3)",
       [nomeId, usuarioNome, telefone]
     );
     res.json({ success: true });
@@ -102,7 +87,6 @@ app.post("/comprar", async (req, res) => {
   }
 });
 
-// Buscar todos os pedidos (usado na página admin)
 app.get("/pedidos", async (req, res) => {
   try {
     const result = await pool.query(`
@@ -117,7 +101,6 @@ app.get("/pedidos", async (req, res) => {
   }
 });
 
-// Confirmar compra (muda status para vendido)
 app.post("/confirmar", async (req, res) => {
   const { nomeId } = req.body;
   if (!nomeId) return res.status(400).json({ error: "nomeId é obrigatório" });
@@ -130,7 +113,6 @@ app.post("/confirmar", async (req, res) => {
   }
 });
 
-// Cancelar reserva (remove pedido e libera nome)
 app.post("/cancelar", async (req, res) => {
   const { nomeId } = req.body;
   if (!nomeId) return res.status(400).json({ error: "nomeId é obrigatório" });
@@ -144,6 +126,63 @@ app.post("/cancelar", async (req, res) => {
   }
 });
 
-// ---------------------- INICIAR SERVIDOR ----------------------
+// ---------------------- SORTEIO ----------------------
+
+async function garantirPremiado() {
+  const jaTem = await pool.query("SELECT COUNT(*) FROM nomes WHERE premiado = true");
+  if (parseInt(jaTem.rows[0].count) === 0) {
+    await pool.query(`
+      UPDATE nomes SET premiado = true 
+      WHERE id = (SELECT id FROM nomes ORDER BY RANDOM() LIMIT 1)
+    `);
+    console.log("✅ Nome premiado escolhido aleatoriamente!");
+  }
+}
+
+// Revelar ganhador
+app.get("/sorteio", async (req, res) => {
+  try {
+    const vendidos = await pool.query("SELECT COUNT(*) FROM nomes WHERE status = 'vendido'");
+    const total = await pool.query("SELECT COUNT(*) FROM nomes");
+    if (parseInt(vendidos.rows[0].count) < parseInt(total.rows[0].count)) {
+      return res.status(400).json({ error: "Ainda há nomes não vendidos" });
+    }
+
+    const result = await pool.query(`
+      SELECT n.nome, p.cliente_nome, p.telefone
+      FROM nomes n
+      JOIN pedidos p ON p.nome_id = n.id
+      WHERE n.premiado = true
+      LIMIT 1
+    `);
+
+    if (result.rowCount === 0)
+      return res.status(404).json({ error: "Nenhum nome premiado encontrado" });
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao buscar ganhador", details: err.message });
+  }
+});
+
+// ---------------------- RESET ----------------------
+
+app.post("/resetar", async (req, res) => {
+  try {
+    await pool.query("DELETE FROM pedidos");
+    await pool.query("UPDATE nomes SET status = NULL, premiado = FALSE");
+    await pool.query(`
+      UPDATE nomes SET premiado = true
+      WHERE id = (SELECT id FROM nomes ORDER BY RANDOM() LIMIT 1)
+    `);
+    res.json({ success: true, message: "Rifa resetada e novo premiado escolhido" });
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao resetar rifa", details: err.message });
+  }
+});
+
+// Garante que sempre exista um premiado ao iniciar
+garantirPremiado();
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+app.listen(PORT, () => console.log("Servidor rodando na porta " + PORT));

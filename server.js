@@ -12,12 +12,15 @@ app.use(express.json());
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
+  ssl: process.env.DATABASE_URL?.includes("render.com")
+    ? { rejectUnauthorized: false }
+    : false
 });
 
-// Cria tabela config automaticamente, se não existir
-async function criarTabelaConfigSeNecessario() {
+// Cria tabelas automaticamente se não existirem
+async function criarTabelasSeNecessario() {
   try {
+    // config
     await pool.query(`
       CREATE TABLE IF NOT EXISTS config (
         id SERIAL PRIMARY KEY,
@@ -25,15 +28,49 @@ async function criarTabelaConfigSeNecessario() {
         premio NUMERIC(12,2) NOT NULL DEFAULT 5000.00
       )
     `);
-    const r = await pool.query("SELECT COUNT(*) FROM config");
-    if (parseInt(r.rows[0].count) === 0) {
+    const cfg = await pool.query("SELECT COUNT(*) FROM config");
+    if (parseInt(cfg.rows[0].count) === 0) {
       await pool.query("INSERT INTO config (valor_rifa, premio) VALUES ($1,$2)", [10.0, 5000.0]);
     }
+
+    // admins
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS admins (
+        id SERIAL PRIMARY KEY,
+        email TEXT UNIQUE NOT NULL,
+        senha TEXT NOT NULL
+      )
+    `);
+
+    // nomes
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS nomes (
+        id SERIAL PRIMARY KEY,
+        nome TEXT NOT NULL,
+        status TEXT,
+        premiado BOOLEAN DEFAULT FALSE
+      )
+    `);
+    const nomes = await pool.query("SELECT COUNT(*) FROM nomes");
+    if (parseInt(nomes.rows[0].count) === 0) {
+      const valores = Array.from({ length: 100 }, (_, i) => `('Nome ${i + 1}')`).join(",");
+      await pool.query(`INSERT INTO nomes (nome) VALUES ${valores}`);
+    }
+
+    // pedidos
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS pedidos (
+        id SERIAL PRIMARY KEY,
+        nome_id INT REFERENCES nomes(id),
+        cliente_nome TEXT NOT NULL,
+        telefone TEXT NOT NULL
+      )
+    `);
   } catch (err) {
-    console.error("Erro ao criar tabela config:", err.message);
+    console.error("Erro ao criar tabelas:", err.message);
   }
 }
-criarTabelaConfigSeNecessario();
+await criarTabelasSeNecessario();
 
 // ---------------------- ADMIN ----------------------
 
@@ -238,7 +275,7 @@ app.post("/resetar", async (req, res) => {
   }
 });
 
-garantirPremiado();
+await garantirPremiado();
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Servidor rodando na porta " + PORT));

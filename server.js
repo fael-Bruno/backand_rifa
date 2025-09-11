@@ -1,14 +1,10 @@
-// server.js - Backend da Rifa (ESM - import/export)
-// Requisitos: "type": "module" no package.json
+// server.js - Backend da Rifa (CommonJS)
 // Rodar com: node server.js
 
-import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
-import pkg from "pg";
-
-dotenv.config();
-const { Pool } = pkg;
+require("dotenv").config();
+const express = require("express");
+const cors = require("cors");
+const { Pool } = require("pg");
 
 const app = express();
 app.use(cors());
@@ -16,7 +12,8 @@ app.use(express.json());
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  // ssl: { rejectUnauthorized: false } // descomente se precisar (Render geralmente exige)
+  // Para Render/Heroku geralmente precisa SSL:
+  ssl: { rejectUnauthorized: false }
 });
 
 const PORT = process.env.PORT || 3000;
@@ -234,10 +231,7 @@ app.post("/cancelar", async (req, res) => {
     }
 
     if (pedidoId) {
-      await client.query(
-        "UPDATE pedidos SET status = 'cancelado' WHERE id = $1",
-        [pedidoId]
-      );
+      await client.query("UPDATE pedidos SET status = 'cancelado' WHERE id = $1", [pedidoId]);
     } else {
       await client.query(
         "UPDATE pedidos SET status = 'cancelado' WHERE nome_id = $1 AND status = 'pendente'",
@@ -259,7 +253,7 @@ app.post("/cancelar", async (req, res) => {
 // Health check
 app.get("/", (req, res) => res.send("🎟️ Backend da Rifa rodando!"));
 
-/* Start server */
+// Start server
 initDb().then(() => {
   app.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT} 🚀`);

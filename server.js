@@ -227,19 +227,17 @@ app.get("/sorteio", async (req, res) => {
 
 // ---------------------- CONFIG ----------------------
 
-app.get("/config", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT id, valor_rifa, premio FROM config LIMIT 1");
-    if (result.rowCount === 0) return res.status(404).json({ error: "Configuração não encontrada" });
-    res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: "Erro ao buscar configuração", details: err.message });
-  }
-});
-
 app.post("/config", async (req, res) => {
-  const { valor, premio } = req.body;
-  if (valor === undefined && premio === undefined) return res.status(400).json({ error: "Nenhum valor enviado" });
+  let { valor, premio } = req.body;
+
+  // converte para número ou null (evita NaN)
+  valor = valor !== undefined && valor !== null && valor !== "" && !isNaN(valor) ? Number(valor) : null;
+  premio = premio !== undefined && premio !== null && premio !== "" && !isNaN(premio) ? Number(premio) : null;
+
+  if (valor === null && premio === null) {
+    return res.status(400).json({ error: "Nenhum valor enviado" });
+  }
+
   try {
     const atual = await pool.query("SELECT id FROM config LIMIT 1");
     if (atual.rowCount === 0) {
@@ -256,6 +254,16 @@ app.post("/config", async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: "Erro ao atualizar configuração", details: err.message });
+  }
+});
+
+app.get("/config", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT id, valor_rifa, premio FROM config LIMIT 1");
+    if (result.rowCount === 0) return res.status(404).json({ error: "Configuração não encontrada" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao buscar configuração", details: err.message });
   }
 });
 

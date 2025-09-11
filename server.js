@@ -1,261 +1,149 @@
-// server.js - Backend da Rifa (CommonJS)
-// Rodar com: node server.js
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import pkg from "pg";
 
-require("dotenv").config();
-const express = require("express");
-const cors = require("cors");
-const { Pool } = require("pg");
+dotenv.config();
+const { Pool } = pkg;
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+// conexão com o banco
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  // Para Render/Heroku geralmente precisa SSL:
-  ssl: { rejectUnauthorized: false }
+  ssl: { rejectUnauthorized: false } // necessário para o Render
 });
 
-const PORT = process.env.PORT || 3000;
+// ---------------------- ROTAS ADMIN ----------------------
 
-/* ---------------------------
-   Inicialização do banco
-   --------------------------- */
-async function initDb() {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-
-    await client.query(`
-      ALTER TABLE nomes
-      ADD COLUMN IF NOT EXISTS valor DECIMAL(10,2) DEFAULT 10.00;
-    `);
-
-    await client.query(`
-      ALTER TABLE nomes
-      ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'disponivel';
-    `);
-
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS pedidos (
-        id SERIAL PRIMARY KEY,
-        nome_id INT REFERENCES nomes(id),
-        cliente_nome VARCHAR(200) NOT NULL,
-        telefone VARCHAR(50) NOT NULL,
-        status VARCHAR(20) DEFAULT 'pendente',
-        criado_em TIMESTAMP DEFAULT now()
-      );
-    `);
-
-    await client.query("COMMIT");
-    console.log("DB init OK ✅");
-  } catch (err) {
-    await client.query("ROLLBACK");
-    console.error("Erro init DB:", err);
-  } finally {
-    client.release();
+// Cadastro de admin
+app.post("/admin/cadastrar", async (req, res) => {
+  const { email, senha } = req.body;
+  if (!email || !senha) {
+    return res.status(400).json({ error: "Email e senha são obrigatórios" });
   }
-}
 
-/* ---------------------------
-   Rotas
-   --------------------------- */
-
-// Listar nomes
-app.get("/nomes", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, nome, valor, status FROM nomes ORDER BY id ASC"
+      "INSERT INTO admins (email, senha) VALUES ($1, $2) RETURNING id, email",
+      [email, senha]
     );
-    res.json(result.rows);
+    res.json({ success: true, admin: result.rows[0] });
   } catch (err) {
-    console.error("/nomes error", err);
-    res.status(500).json({ error: "Erro ao buscar nomes" });
+    res.status(500).json({ error: "Erro ao cadastrar admin", details: err.message });
   }
 });
 
-// Reservar nome
-app.post("/reservar", async (req, res) => {
-  const { nomeId } = req.body;
-  if (!nomeId)
-    return res.status(400).json({ success: false, error: "nomeId é obrigatório" });
+// Login de admin
+app.post("/admin/login", async (req, res) => {
+  const { email, senha } = req.body;
+  if (!email || !senha) {
+    return res.status(400).json({ error: "Email e senha obrigatórios" });
+  }
 
   try {
     const result = await pool.query(
-      "UPDATE nomes SET status = 'reservado' WHERE id = $1 AND status = 'disponivel' RETURNING id",
-      [nomeId]
+      "SELECT * FROM admins WHERE email = $1 AND senha = $2",
+      [email, senha]
     );
 
     if (result.rowCount === 0) {
-      return res.json({ success: false, error: "Nome não disponível para reserva" });
+      return res.status(401).json({ error: "Email ou senha incorretos" });
     }
 
-    res.json({ success: true });
+    res.json({ success: true, message: "Login bem-sucedido" });
   } catch (err) {
-    console.error("/reservar error", err);
-    res.status(500).json({ success: false, error: "Erro ao reservar nome" });
+    res.status(500).json({ error: "Erro ao logar admin", details: err.message });
   }
 });
 
-// Comprar (criar pedido + reservar)
+// ---------------------- ROTAS RIFA ----------------------
+
+// Buscar todos os nomes
+app.get("/nomes", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM nomes ORDER BY id ASC");
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao buscar nomes", details: err.message });
+  }
+});
+
+// Reservar um nome
+app.post("/reservar", async (req, res) => {
+  const { nomeId } = req.body;
+  if (!nomeId) return res.status(400).json({ error: "nomeId é obrigatório" });
+
+  try {
+    await pool.query("UPDATE nomes SET status = 'reservado' WHERE id = $1", [nomeId]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao reservar nome", details: err.message });
+  }
+});
+
+// Criar pedido (registrar compra)
 app.post("/comprar", async (req, res) => {
   const { nomeId, usuarioNome, telefone } = req.body;
   if (!nomeId || !usuarioNome || !telefone) {
-    return res
-      .status(400)
-      .json({ success: false, error: "nomeId, usuarioNome e telefone são obrigatórios" });
+    return res.status(400).json({ error: "Campos obrigatórios faltando" });
   }
 
-  const client = await pool.connect();
   try {
-    await client.query("BEGIN");
-
-    const upd = await client.query(
-      "UPDATE nomes SET status = 'reservado' WHERE id = $1 AND status = 'disponivel' RETURNING id",
-      [nomeId]
-    );
-
-    if (upd.rowCount === 0) {
-      await client.query("ROLLBACK");
-      return res.json({ success: false, error: "Nome não disponível" });
-    }
-
-    const insert = await client.query(
-      `INSERT INTO pedidos (nome_id, cliente_nome, telefone, status)
-       VALUES ($1, $2, $3, 'pendente') RETURNING id`,
+    await pool.query(
+      "INSERT INTO pedidos (nome_id, cliente_nome, telefone) VALUES ($1, $2, $3)",
       [nomeId, usuarioNome, telefone]
     );
-
-    await client.query("COMMIT");
-    res.json({ success: true, pedidoId: insert.rows[0].id });
+    res.json({ success: true });
   } catch (err) {
-    await client.query("ROLLBACK");
-    console.error("/comprar error", err);
-    res.status(500).json({ success: false, error: "Erro ao criar pedido" });
-  } finally {
-    client.release();
+    res.status(500).json({ error: "Erro ao registrar compra", details: err.message });
   }
 });
 
-// Listar pedidos (admin)
+// Buscar todos os pedidos (usado na página admin)
 app.get("/pedidos", async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT p.id, p.nome_id, p.cliente_nome, p.telefone, p.status AS pedido_status, p.criado_em,
-             n.nome AS nome, n.status AS nome_status, n.valor
+      SELECT p.id, p.cliente_nome, p.telefone, n.nome, n.id AS nome_id, n.status
       FROM pedidos p
       JOIN nomes n ON p.nome_id = n.id
       ORDER BY p.id DESC
     `);
-
-    const rows = result.rows.map((r) => ({
-      id: r.id,
-      nome_id: r.nome_id,
-      cliente_nome: r.cliente_nome,
-      telefone: r.telefone,
-      status: r.pedido_status,
-      criado_em: r.criado_em,
-      nome: r.nome,
-      nome_status: r.nome_status,
-      valor: r.valor,
-    }));
-
-    res.json(rows);
+    res.json(result.rows);
   } catch (err) {
-    console.error("/pedidos error", err);
-    res.status(500).json({ error: "Erro ao buscar pedidos" });
+    res.status(500).json({ error: "Erro ao buscar pedidos", details: err.message });
   }
 });
 
-// Confirmar pagamento
+// Confirmar compra (muda status para vendido)
 app.post("/confirmar", async (req, res) => {
-  const { nomeId, pedidoId } = req.body;
-  if (!nomeId)
-    return res.status(400).json({ success: false, error: "nomeId é obrigatório" });
+  const { nomeId } = req.body;
+  if (!nomeId) return res.status(400).json({ error: "nomeId é obrigatório" });
 
-  const client = await pool.connect();
   try {
-    await client.query("BEGIN");
-
-    const updNome = await client.query(
-      "UPDATE nomes SET status = 'vendido' WHERE id = $1 AND status = 'reservado' RETURNING id",
-      [nomeId]
-    );
-
-    if (updNome.rowCount === 0) {
-      await client.query("ROLLBACK");
-      return res.json({ success: false, error: "Nome não estava reservado" });
-    }
-
-    if (pedidoId) {
-      await client.query(
-        "UPDATE pedidos SET status = 'confirmado' WHERE id = $1",
-        [pedidoId]
-      );
-    } else {
-      await client.query(
-        "UPDATE pedidos SET status = 'confirmado' WHERE nome_id = $1 AND status = 'pendente'",
-        [nomeId]
-      );
-    }
-
-    await client.query("COMMIT");
+    await pool.query("UPDATE nomes SET status = 'vendido' WHERE id = $1", [nomeId]);
     res.json({ success: true });
   } catch (err) {
-    await client.query("ROLLBACK");
-    console.error("/confirmar error", err);
-    res.status(500).json({ success: false, error: "Erro ao confirmar pagamento" });
-  } finally {
-    client.release();
+    res.status(500).json({ error: "Erro ao confirmar compra", details: err.message });
   }
 });
 
-// Cancelar reserva
+// Cancelar reserva (remove pedido e libera nome)
 app.post("/cancelar", async (req, res) => {
-  const { nomeId, pedidoId } = req.body;
-  if (!nomeId)
-    return res.status(400).json({ success: false, error: "nomeId é obrigatório" });
+  const { nomeId } = req.body;
+  if (!nomeId) return res.status(400).json({ error: "nomeId é obrigatório" });
 
-  const client = await pool.connect();
   try {
-    await client.query("BEGIN");
-
-    const updNome = await client.query(
-      "UPDATE nomes SET status = 'disponivel' WHERE id = $1 AND status = 'reservado' RETURNING id",
-      [nomeId]
-    );
-
-    if (updNome.rowCount === 0) {
-      await client.query("ROLLBACK");
-      return res.json({ success: false, error: "Nome não estava reservado" });
-    }
-
-    if (pedidoId) {
-      await client.query("UPDATE pedidos SET status = 'cancelado' WHERE id = $1", [pedidoId]);
-    } else {
-      await client.query(
-        "UPDATE pedidos SET status = 'cancelado' WHERE nome_id = $1 AND status = 'pendente'",
-        [nomeId]
-      );
-    }
-
-    await client.query("COMMIT");
+    await pool.query("DELETE FROM pedidos WHERE nome_id = $1", [nomeId]);
+    await pool.query("UPDATE nomes SET status = NULL WHERE id = $1", [nomeId]);
     res.json({ success: true });
   } catch (err) {
-    await client.query("ROLLBACK");
-    console.error("/cancelar error", err);
-    res.status(500).json({ success: false, error: "Erro ao cancelar reserva" });
-  } finally {
-    client.release();
+    res.status(500).json({ error: "Erro ao cancelar reserva", details: err.message });
   }
 });
 
-// Health check
-app.get("/", (req, res) => res.send("🎟️ Backend da Rifa rodando!"));
-
-// Start server
-initDb().then(() => {
-  app.listen(PORT, () => {
-    console.log(`Servidor rodando na porta ${PORT} 🚀`);
-  });
-});
+// ---------------------- INICIAR SERVIDOR ----------------------
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));

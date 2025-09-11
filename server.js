@@ -17,7 +17,7 @@ const pool = new Pool({
     : false
 });
 
-// cria tabelas se necessario
+// cria tabelas se necessário
 async function criarTabelas() {
   try {
     await pool.query(`
@@ -27,9 +27,18 @@ async function criarTabelas() {
         premio NUMERIC(12,2) NOT NULL DEFAULT 5000.00
       );
     `);
+
+    // garante que exista exatamente 1 linha
     const cfg = await pool.query("SELECT COUNT(*) FROM config");
     if (parseInt(cfg.rows[0].count) === 0) {
-      await pool.query("INSERT INTO config (valor_rifa, premio) VALUES ($1,$2)", [10.0, 5000.0]);
+      await pool.query(
+        "INSERT INTO config (valor_rifa, premio) VALUES ($1,$2)",
+        [10.0, 5000.0]
+      );
+    } else if (parseInt(cfg.rows[0].count) > 1) {
+      await pool.query(
+        "DELETE FROM config WHERE id NOT IN (SELECT id FROM config ORDER BY id LIMIT 1)"
+      );
     }
 
     await pool.query(`
@@ -98,7 +107,6 @@ app.post("/admin/login", async (req, res) => {
 });
 
 // ---------------- CONFIG ----------------
-// util para converter entradas com vírgula/diferentes formatos
 function parseNumberInput(v) {
   if (v === undefined || v === null) return null;
   if (typeof v === "string") {
@@ -113,9 +121,7 @@ function parseNumberInput(v) {
 app.get("/config", async (req, res) => {
   try {
     const r = await pool.query("SELECT valor_rifa, premio FROM config LIMIT 1");
-    if (r.rowCount === 0) {
-      return res.json({ valor_rifa: 0, premio: 0 });
-    }
+    if (r.rowCount === 0) return res.status(404).json({ error: "Configuração não encontrada" });
     const cfg = r.rows[0];
     res.json({
       valor_rifa: parseFloat(cfg.valor_rifa) || 0,
@@ -129,27 +135,29 @@ app.get("/config", async (req, res) => {
 app.post("/config", async (req, res) => {
   try {
     let { valor, premio } = req.body;
-
     valor = parseNumberInput(valor);
     premio = parseNumberInput(premio);
 
-    if (valor === null || premio === null) {
-      return res.status(400).json({ error: "Valores inválidos" });
+    if (valor === null && premio === null) {
+      return res.status(400).json({ error: "Nenhum valor enviado" });
     }
 
+    // garante que exista linha antes de atualizar
     const atual = await pool.query("SELECT id FROM config LIMIT 1");
+    let id;
     if (atual.rowCount === 0) {
-      await pool.query(
-        "INSERT INTO config (valor_rifa, premio) VALUES ($1,$2)",
-        [valor, premio]
-      );
+      const ins = await pool.query("INSERT INTO config (valor_rifa, premio) VALUES ($1,$2) RETURNING id", [valor ?? 10.0, premio ?? 5000.0]);
+      id = ins.rows[0].id;
     } else {
+      id = atual.rows[0].id;
       await pool.query(
-        "UPDATE config SET valor_rifa=$1, premio=$2 WHERE id=$3",
-        [valor, premio, atual.rows[0].id]
+        `UPDATE config SET
+          valor_rifa = COALESCE($1, valor_rifa),
+          premio = COALESCE($2, premio)
+         WHERE id = $3`,
+        [valor, premio, id]
       );
     }
-
     res.json({ success: true });
   } catch (err) {
     console.error("Erro POST /config:", err.message);

@@ -14,7 +14,6 @@ const pool = new Pool({
   ssl: process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : false
 });
 
-// Inicializa tabelas
 async function initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS usuarios (
@@ -67,7 +66,7 @@ async function initDB() {
 }
 initDB().catch((e) => console.error("Erro initDB:", e));
 
-// ---- ROTAS ADMIN ----
+// ----------------- ADMIN -----------------
 app.post("/admin/login", async (req, res) => {
   const { email, senha } = req.body;
   const r = await pool.query("SELECT * FROM admins WHERE email=$1 AND senha=$2", [email, senha]);
@@ -86,7 +85,7 @@ app.post("/usuarios/ativar", async (req, res) => {
   res.json({ success: true });
 });
 
-// ---- ROTAS ORGANIZADORES ----
+// --------------- USUÁRIOS ----------------
 app.post("/usuarios/registro", async (req, res) => {
   const { nome, email, senha } = req.body;
   try {
@@ -109,7 +108,7 @@ app.post("/usuarios/login", async (req, res) => {
   res.json({ success: true, usuarioId: u.id });
 });
 
-// ---- CONFIGURAÇÃO ----
+// --------------- CONFIG ----------------
 app.get("/config", async (req, res) => {
   const { usuarioId } = req.query;
   const r = await pool.query("SELECT * FROM config WHERE usuario_id=$1", [usuarioId]);
@@ -125,7 +124,7 @@ app.post("/config", async (req, res) => {
   res.json({ success: true });
 });
 
-// ---- NOMES ----
+// --------------- NOMES ----------------
 app.get("/nomes", async (req, res) => {
   const { usuarioId } = req.query;
   const r = await pool.query("SELECT * FROM nomes WHERE usuario_id=$1 ORDER BY id", [usuarioId]);
@@ -137,7 +136,7 @@ app.post("/nomes", async (req, res) => {
   res.json({ success: true });
 });
 
-// ---- PEDIDOS ----
+// --------------- PEDIDOS ----------------
 app.get("/pedidos", async (req, res) => {
   const { usuarioId } = req.query;
   if (usuarioId) {
@@ -182,7 +181,7 @@ app.post("/cancelar", async (req, res) => {
   res.json({ success: true });
 });
 
-// ---- SORTEIO E RESET ----
+// --------------- SORTEIO / RESET ----------------
 app.get("/sorteio", async (req, res) => {
   const { usuarioId } = req.query;
   const r = await pool.query(

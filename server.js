@@ -2,7 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const { Pool } = require("pg");
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 
 const app = express();
 app.use(cors());
@@ -36,7 +36,7 @@ async function initDB() {
       id SERIAL PRIMARY KEY,
       valor_rifa NUMERIC,
       premio TEXT,
-      usuario_id INT REFERENCES usuarios(id)
+      usuario_id INT REFERENCES usuarios(id) UNIQUE
     );
 
     CREATE TABLE IF NOT EXISTS nomes (

@@ -61,7 +61,7 @@ async function initDB() {
       id SERIAL PRIMARY KEY,
       valor_rifa NUMERIC DEFAULT 0,
       premio TEXT,
-      usuario_id INT REFERENCES usuarios(id)
+      usuario_id INT UNIQUE REFERENCES usuarios(id)
     );
   `);
 }
@@ -138,7 +138,7 @@ app.post("/usuarios/ativar", async (req, res) => {
   }
 });
 
-// ===================== ROTAS RIFA (existentes adaptadas) =====================
+// ===================== ROTAS RIFA =====================
 app.get("/nomes", async (req, res) => {
   const { usuarioId } = req.query;
   try {
@@ -193,8 +193,8 @@ app.get("/pedidos", async (req, res) => {
   const { usuarioId } = req.query;
   try {
     const r = usuarioId
-      ? await pool.query("SELECT p.*, n.nome, p.usuario_id FROM pedidos p JOIN nomes n ON n.id=p.nome_id WHERE p.usuario_id=$1 ORDER BY p.id DESC", [usuarioId])
-      : await pool.query("SELECT p.*, n.nome, p.usuario_id FROM pedidos p JOIN nomes n ON n.id=p.nome_id ORDER BY p.id DESC");
+      ? await pool.query("SELECT p.*, n.nome FROM pedidos p JOIN nomes n ON n.id=p.nome_id WHERE p.usuario_id=$1 ORDER BY p.id DESC", [usuarioId])
+      : await pool.query("SELECT p.*, n.nome FROM pedidos p JOIN nomes n ON n.id=p.nome_id ORDER BY p.id DESC");
     res.json(r.rows);
   } catch {
     res.status(500).json({ error: "Erro ao buscar pedidos" });
@@ -234,6 +234,32 @@ app.post("/cancelar", async (req, res) => {
     res.json({ success: true });
   } catch {
     res.status(500).json({ error: "Erro ao cancelar" });
+  }
+});
+
+// ===== NOVAS ROTAS =====
+app.get("/sorteio", async (req, res) => {
+  const { usuarioId } = req.query;
+  try {
+    const r = await pool.query(
+      "SELECT p.*, n.nome FROM pedidos p JOIN nomes n ON n.id=p.nome_id WHERE p.status='confirmado' AND p.usuario_id=$1 ORDER BY RANDOM() LIMIT 1",
+      [usuarioId]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: "Nenhum pedido confirmado" });
+    res.json(r.rows[0]);
+  } catch {
+    res.status(500).json({ error: "Erro ao sortear" });
+  }
+});
+
+app.post("/resetar", async (req, res) => {
+  const { usuarioId } = req.body;
+  try {
+    await pool.query("DELETE FROM pedidos WHERE usuario_id=$1", [usuarioId]);
+    await pool.query("UPDATE nomes SET status='disponivel' WHERE usuario_id=$1", [usuarioId]);
+    res.json({ success: true, message: "Rifa resetada com sucesso" });
+  } catch {
+    res.status(500).json({ error: "Erro ao resetar" });
   }
 });
 

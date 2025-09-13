@@ -1,7 +1,7 @@
 {
   "name": "rifa-api",
   "version": "1.0.0",
-  "type": "commonjs",
+  "type": "module",
   "scripts": {
     "start": "node server.js"
   },
@@ -9,7 +9,6 @@
     "cors": "^2.8.5",
     "dotenv": "^16.0.0",
     "express": "^4.18.2",
-    "pg": "^8.10.0",
-    "bcryptjs": "^2.4.3"
+    "pg": "^8.10.0"
   }
 }

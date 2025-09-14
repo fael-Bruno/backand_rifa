@@ -24,7 +24,6 @@ pool.on("error", (err) => console.error("Erro no pool do Postgres:", err));
 // ---------------- CRIA TABELAS ----------------
 async function criarTabelas() {
   try {
-    // Usuários
     await pool.query(`
       CREATE TABLE IF NOT EXISTS usuarios (
         id SERIAL PRIMARY KEY,
@@ -36,7 +35,6 @@ async function criarTabelas() {
       );
     `);
 
-    // Admins
     await pool.query(`
       CREATE TABLE IF NOT EXISTS admins (
         id SERIAL PRIMARY KEY,
@@ -45,7 +43,6 @@ async function criarTabelas() {
       );
     `);
 
-    // Config
     await pool.query(`
       CREATE TABLE IF NOT EXISTS config (
         id SERIAL PRIMARY KEY,
@@ -54,7 +51,6 @@ async function criarTabelas() {
       );
     `);
 
-    // Nomes
     await pool.query(`
       CREATE TABLE IF NOT EXISTS nomes (
         id SERIAL PRIMARY KEY,
@@ -64,7 +60,6 @@ async function criarTabelas() {
       );
     `);
 
-    // Pedidos
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pedidos (
         id SERIAL PRIMARY KEY,
@@ -82,11 +77,9 @@ async function criarTabelas() {
 await criarTabelas();
 
 // ---------------- USUÁRIOS ----------------
-// Registro de usuário
+// Registro
 app.post("/users/register", async (req, res) => {
   try {
-    console.log("🟢 Requisição recebida em /users/register:", req.body);
-
     const { email, senha } = req.body;
     if (!email || !senha)
       return res.status(400).json({ error: "Email e senha obrigatórios" });
@@ -95,27 +88,23 @@ app.post("/users/register", async (req, res) => {
 
     const r = await pool.query("SELECT id FROM usuarios WHERE email = $1", [emailLower]);
     if (r.rowCount > 0) {
-      console.log("⚠️ Email já cadastrado:", emailLower);
       return res.status(400).json({ error: "Email já cadastrado" });
     }
 
     const hash = await bcrypt.hash(senha, 10);
-
-    const insert = await pool.query(
-      "INSERT INTO usuarios (email, senha, approved, blocked) VALUES ($1,$2,false,false) RETURNING id",
+    await pool.query(
+      "INSERT INTO usuarios (email, senha, approved, blocked) VALUES ($1,$2,false,false)",
       [emailLower, hash]
     );
 
-    console.log("✅ Usuário cadastrado com sucesso:", insert.rows[0].id);
     res.json({ success: true, message: "Cadastro realizado! Aguarde aprovação do administrador." });
-
   } catch (err) {
     console.error("❌ Erro ao cadastrar usuário:", err);
     res.status(500).json({ error: "Erro ao cadastrar usuário", details: err.message });
   }
 });
 
-// Login de usuário
+// Login
 app.post("/users/login", async (req, res) => {
   try {
     const { email, senha } = req.body;
@@ -137,14 +126,12 @@ app.post("/users/login", async (req, res) => {
     if (!ok) return res.status(401).json({ error: "Email ou senha incorretos" });
 
     res.json({ success: true, user: { id: u.id, email: u.email } });
-
   } catch (err) {
     res.status(500).json({ error: "Erro ao logar usuário", details: err.message });
   }
 });
 
 // ---------------- ADMINS ----------------
-// Login admin
 app.post("/admin/login", async (req, res) => {
   try {
     const { email, senha } = req.body;
@@ -173,7 +160,7 @@ app.get("/admin/users", async (req, res) => {
   }
 });
 
-// Aprovar/reprovar usuário
+// Aprovar/reprovar
 app.post("/admin/users/approve", async (req, res) => {
   const { id, approve } = req.body;
   try {
@@ -184,7 +171,7 @@ app.post("/admin/users/approve", async (req, res) => {
   }
 });
 
-// Bloquear/desbloquear usuário
+// Bloquear/desbloquear
 app.post("/admin/users/block", async (req, res) => {
   const { id, block } = req.body;
   try {
@@ -195,7 +182,7 @@ app.post("/admin/users/block", async (req, res) => {
   }
 });
 
-// Excluir usuário
+// Excluir
 app.delete("/admin/users/:id", async (req, res) => {
   try {
     await pool.query("DELETE FROM usuarios WHERE id = $1", [req.params.id]);

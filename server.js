@@ -24,6 +24,7 @@ pool.on("error", (err) => console.error("Erro no pool do Postgres:", err));
 // ---------------- CRIA TABELAS ----------------
 async function criarTabelas() {
   try {
+    // Usuários
     await pool.query(`
       CREATE TABLE IF NOT EXISTS usuarios (
         id SERIAL PRIMARY KEY,
@@ -34,7 +35,46 @@ async function criarTabelas() {
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
-    console.log("✅ Tabela usuarios criada/verificada");
+
+    // Admins
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS admins (
+        id SERIAL PRIMARY KEY,
+        email TEXT UNIQUE NOT NULL,
+        senha TEXT NOT NULL
+      );
+    `);
+
+    // Config
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS config (
+        id SERIAL PRIMARY KEY,
+        valor_rifa NUMERIC(10,2) NOT NULL DEFAULT 10.00,
+        premio NUMERIC(12,2) NOT NULL DEFAULT 5000.00
+      );
+    `);
+
+    // Nomes
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS nomes (
+        id SERIAL PRIMARY KEY,
+        nome TEXT NOT NULL,
+        status TEXT,
+        premiado BOOLEAN DEFAULT FALSE
+      );
+    `);
+
+    // Pedidos
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS pedidos (
+        id SERIAL PRIMARY KEY,
+        nome_id INT REFERENCES nomes(id),
+        cliente_nome TEXT NOT NULL,
+        telefone TEXT NOT NULL
+      );
+    `);
+
+    console.log("✅ Tabelas criadas/verificadas com sucesso");
   } catch (err) {
     console.error("Erro criando tabelas:", err.message);
   }
@@ -45,7 +85,8 @@ await criarTabelas();
 // Registro de usuário
 app.post("/users/register", async (req, res) => {
   try {
-    console.log("Recebido registro:", req.body);
+    console.log("🟢 Requisição recebida em /users/register:", req.body);
+
     const { email, senha } = req.body;
     if (!email || !senha)
       return res.status(400).json({ error: "Email e senha obrigatórios" });
@@ -54,21 +95,22 @@ app.post("/users/register", async (req, res) => {
 
     const r = await pool.query("SELECT id FROM usuarios WHERE email = $1", [emailLower]);
     if (r.rowCount > 0) {
-      console.log("Email já cadastrado:", emailLower);
+      console.log("⚠️ Email já cadastrado:", emailLower);
       return res.status(400).json({ error: "Email já cadastrado" });
     }
 
     const hash = await bcrypt.hash(senha, 10);
-    await pool.query(
-      "INSERT INTO usuarios (email, senha, approved, blocked) VALUES ($1,$2,false,false)",
+
+    const insert = await pool.query(
+      "INSERT INTO usuarios (email, senha, approved, blocked) VALUES ($1,$2,false,false) RETURNING id",
       [emailLower, hash]
     );
 
-    console.log("Usuário cadastrado com sucesso:", emailLower);
+    console.log("✅ Usuário cadastrado com sucesso:", insert.rows[0].id);
     res.json({ success: true, message: "Cadastro realizado! Aguarde aprovação do administrador." });
 
   } catch (err) {
-    console.error("Erro ao cadastrar usuário:", err);
+    console.error("❌ Erro ao cadastrar usuário:", err);
     res.status(500).json({ error: "Erro ao cadastrar usuário", details: err.message });
   }
 });

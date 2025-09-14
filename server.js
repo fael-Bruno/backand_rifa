@@ -77,7 +77,6 @@ async function criarTabelas() {
 await criarTabelas();
 
 // ---------------- USUÁRIOS ----------------
-// Registro
 app.post("/users/register", async (req, res) => {
   try {
     const { email, senha } = req.body;
@@ -104,7 +103,6 @@ app.post("/users/register", async (req, res) => {
   }
 });
 
-// Login
 app.post("/users/login", async (req, res) => {
   try {
     const { email, senha } = req.body;
@@ -150,7 +148,6 @@ app.post("/admin/login", async (req, res) => {
   }
 });
 
-// Listar usuários
 app.get("/admin/users", async (req, res) => {
   try {
     const r = await pool.query("SELECT id,email,approved,blocked FROM usuarios ORDER BY id ASC");
@@ -160,7 +157,6 @@ app.get("/admin/users", async (req, res) => {
   }
 });
 
-// Aprovar/reprovar
 app.post("/admin/users/approve", async (req, res) => {
   const { id, approve } = req.body;
   try {
@@ -171,7 +167,6 @@ app.post("/admin/users/approve", async (req, res) => {
   }
 });
 
-// Bloquear/desbloquear
 app.post("/admin/users/block", async (req, res) => {
   const { id, block } = req.body;
   try {
@@ -182,7 +177,6 @@ app.post("/admin/users/block", async (req, res) => {
   }
 });
 
-// Excluir
 app.delete("/admin/users/:id", async (req, res) => {
   try {
     await pool.query("DELETE FROM usuarios WHERE id = $1", [req.params.id]);

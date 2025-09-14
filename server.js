@@ -143,6 +143,68 @@ app.post("/users/login", async (req, res) => {
   }
 });
 
+// ---------------- ADMINS ----------------
+// Login admin
+app.post("/admin/login", async (req, res) => {
+  try {
+    const { email, senha } = req.body;
+    if (!email || !senha) return res.status(400).json({ error: "Email e senha obrigatórios" });
+
+    const r = await pool.query("SELECT * FROM admins WHERE email = $1", [email.trim().toLowerCase()]);
+    if (r.rowCount === 0) return res.status(401).json({ error: "Admin não encontrado" });
+
+    const admin = r.rows[0];
+    const ok = await bcrypt.compare(senha, admin.senha);
+    if (!ok) return res.status(401).json({ error: "Senha incorreta" });
+
+    res.json({ success: true, admin: { id: admin.id, email: admin.email } });
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao logar admin", details: err.message });
+  }
+});
+
+// Listar usuários
+app.get("/admin/users", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT id,email,approved,blocked FROM usuarios ORDER BY id ASC");
+    res.json(r.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao listar usuários", details: err.message });
+  }
+});
+
+// Aprovar/reprovar usuário
+app.post("/admin/users/approve", async (req, res) => {
+  const { id, approve } = req.body;
+  try {
+    await pool.query("UPDATE usuarios SET approved = $1 WHERE id = $2", [approve, id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao aprovar usuário", details: err.message });
+  }
+});
+
+// Bloquear/desbloquear usuário
+app.post("/admin/users/block", async (req, res) => {
+  const { id, block } = req.body;
+  try {
+    await pool.query("UPDATE usuarios SET blocked = $1 WHERE id = $2", [block, id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao bloquear usuário", details: err.message });
+  }
+});
+
+// Excluir usuário
+app.delete("/admin/users/:id", async (req, res) => {
+  try {
+    await pool.query("DELETE FROM usuarios WHERE id = $1", [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao excluir usuário", details: err.message });
+  }
+});
+
 // ---------------- INICIAR SERVIDOR ----------------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Servidor rodando na porta " + PORT));

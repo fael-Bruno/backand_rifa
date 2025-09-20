@@ -3,141 +3,151 @@ const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
-require('dotenv').config();
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: '*' }));
 app.use(express.json());
-app.use(express.static('public'));
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false } // necessário no Render
+  user: 'rifa_db_umol_user',
+  host: 'backand-rifa-z2dj.onrender.com',
+  database: 'rifa_db_umol',
+  password: 'fwXKljEHd1OVoLbrgxlv516FqHAH1XGi',
+  port: 5432
 });
 
-const JWT_SECRET = process.env.JWT_SECRET || 'segredo';
+const JWT_SECRET = 'supersecretkey';
 
-// --- CLIENTES ---
-app.post('/api/clientes/cadastro', async (req,res) => {
-  const {nome,telefone,email,senha} = req.body;
-  if(!nome || !email || !senha) return res.status(400).json({error:'Campos obrigatórios'});
-  const hash = await bcrypt.hash(senha,10);
+// -----------------------
+// Middleware Superadmin
+// -----------------------
+function authSuperAdmin(req,res,next){
+  const token = req.headers['authorization']?.split(' ')[1];
+  if(!token) return res.status(401).json({error:'Sem token'});
   try{
-    const r = await pool.query('INSERT INTO clientes(nome,telefone,email,senha) VALUES($1,$2,$3,$4) RETURNING *',[nome,telefone,email,hash]);
-    res.json(r.rows[0]);
-  }catch(e){
-    res.status(400).json({error:'Email já cadastrado'});
-  }
-});
-
-app.post('/api/clientes/login', async (req,res)=>{
-  const {email,senha} = req.body;
-  const r = await pool.query('SELECT * FROM clientes WHERE email=$1',[email]);
-  if(r.rows.length===0) return res.status(400).json({error:'Usuário não encontrado'});
-  const cliente = r.rows[0];
-  const match = await bcrypt.compare(senha, cliente.senha);
-  if(!match) return res.status(400).json({error:'Senha incorreta'});
-  const token = jwt.sign({id:cliente.id},JWT_SECRET,{expiresIn:'12h'});
-  res.json({token,cliente:{nome:cliente.nome,email:cliente.email,id:cliente.id}});
-});
-
-// Middleware auth cliente
-function authCliente(req,res,next){
-  const h = req.headers['authorization'];
-  if(!h) return res.status(401).json({error:'Token necessário'});
-  const token = h.split(' ')[1];
-  try{
-    const data = jwt.verify(token,JWT_SECRET);
-    req.clienteId = data.id;
+    const payload = jwt.verify(token, JWT_SECRET);
+    if(!payload.isSuperAdmin) return res.status(403).json({error:'Acesso negado'});
+    req.superadmin_id = payload.id;
     next();
   }catch(e){
-    res.status(401).json({error:'Token inválido'});
+    return res.status(401).json({error:'Token inválido'});
   }
 }
 
-// Servicos
-app.get('/api/servicos', async (req,res)=>{
-  const r = await pool.query('SELECT * FROM servicos');
-  res.json(r.rows);
+// -----------------------
+// Middleware Barbearia
+// -----------------------
+function authBarbearia(req,res,next){
+  const token = req.headers['authorization']?.split(' ')[1];
+  if(!token) return res.status(401).json({error:'Sem token'});
+  try{
+    const payload = jwt.verify(token, JWT_SECRET);
+    if(payload.isSuperAdmin) return res.status(403).json({error:'Acesso negado'});
+    req.barbearia_id = payload.barbearia_id;
+    next();
+  }catch(e){
+    return res.status(401).json({error:'Token inválido'});
+  }
+}
+
+// -----------------------
+// Rotas Superadmin
+// -----------------------
+app.post('/api/superadmin/login', async (req,res)=>{
+  const {email, senha} = req.body;
+  const admin = await pool.query('SELECT * FROM superadmins WHERE email=$1',[email]);
+  if(admin.rowCount===0) return res.status(400).json({error:'Email não encontrado'});
+  const valid = await bcrypt.compare(senha, admin.rows[0].senha);
+  if(!valid) return res.status(400).json({error:'Senha incorreta'});
+  const token = jwt.sign({id: admin.rows[0].id, isSuperAdmin:true}, JWT_SECRET, {expiresIn:'8h'});
+  res.json({token, admin:{id:admin.rows[0].id, nome:admin.rows[0].nome}});
+});
+
+// Listar barbearias
+app.get('/api/superadmin/barbearias', authSuperAdmin, async (req,res)=>{
+  const rows = await pool.query('SELECT * FROM barbearias ORDER BY criado_em DESC');
+  res.json(rows.rows);
+});
+
+// Criar barbearia
+app.post('/api/superadmin/barbearias', authSuperAdmin, async (req,res)=>{
+  const {nome,email,senha} = req.body;
+  const hash = await bcrypt.hash(senha,10);
+  const result = await pool.query('INSERT INTO barbearias(nome,email,senha) VALUES($1,$2,$3) RETURNING *',[nome,email,hash]);
+  res.json(result.rows[0]);
+});
+
+// Deletar barbearia
+app.delete('/api/superadmin/barbearias/:id', authSuperAdmin, async (req,res)=>{
+  const {id} = req.params;
+  await pool.query('DELETE FROM barbearias WHERE id=$1',[id]);
+  res.json({success:true});
+});
+
+// -----------------------
+// Rotas Barbearia
+// -----------------------
+
+// Login barbearia
+app.post('/api/barbearias/login', async (req,res)=>{
+  const {email,senha} = req.body;
+  const barbearia = await pool.query('SELECT * FROM barbearias WHERE email=$1',[email]);
+  if(barbearia.rowCount===0) return res.status(400).json({error:'Email não encontrado'});
+  const valid = await bcrypt.compare(senha, barbearia.rows[0].senha);
+  if(!valid) return res.status(400).json({error:'Senha incorreta'});
+  const token = jwt.sign({barbearia_id: barbearia.rows[0].id}, JWT_SECRET, {expiresIn:'8h'});
+  res.json({token, barbearia:{id:barbearia.rows[0].id, nome:barbearia.rows[0].nome}});
+});
+
+// Clientes
+app.get('/api/clientes', authBarbearia, async (req,res)=>{
+  const rows = await pool.query('SELECT * FROM clientes WHERE barbearia_id=$1',[req.barbearia_id]);
+  res.json(rows.rows);
+});
+
+app.post('/api/clientes/cadastro', authBarbearia, async (req,res)=>{
+  const {nome,telefone,email,senha} = req.body;
+  const hash = await bcrypt.hash(senha,10);
+  const result = await pool.query(
+    'INSERT INTO clientes(nome,telefone,email,senha,barbearia_id) VALUES($1,$2,$3,$4,$5) RETURNING *',
+    [nome,telefone,email,hash,req.barbearia_id]
+  );
+  res.json(result.rows[0]);
+});
+
+// Serviços
+app.get('/api/servicos', authBarbearia, async (req,res)=>{
+  const rows = await pool.query('SELECT * FROM servicos WHERE barbearia_id=$1',[req.barbearia_id]);
+  res.json(rows.rows);
 });
 
 // Agendamentos
-app.post('/api/agendamentos', authCliente, async (req,res)=>{
-  const {servico_id,barbeiro,data,hora} = req.body;
-  try{
-    const r = await pool.query('INSERT INTO agendamentos(cliente_id,servico_id,barbeiro,data,hora) VALUES($1,$2,$3,$4,$5) RETURNING *',
-      [req.clienteId,servico_id,barbeiro,data,hora]);
-    res.json(r.rows[0]);
-  }catch(e){
-    res.status(400).json({error:'Erro ao criar agendamento'});
-  }
+app.post('/api/agendamentos', authBarbearia, async (req,res)=>{
+  const {cliente_id,servico_id,barbeiro,data,hora} = req.body;
+  const result = await pool.query(
+    'INSERT INTO agendamentos(cliente_id,servico_id,barbeiro,data,hora,barbearia_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
+    [cliente_id || null, servico_id, barbeiro, data, hora, req.barbearia_id]
+  );
+  res.json(result.rows[0]);
 });
 
-app.get('/api/agendamentos/meus', authCliente, async (req,res)=>{
-  const r = await pool.query(
-    `SELECT a.*, s.nome as servico_nome 
-     FROM agendamentos a 
-     LEFT JOIN servicos s ON s.id = a.servico_id
-     WHERE a.cliente_id=$1 ORDER BY a.data,a.hora`,
-    [req.clienteId]);
-  res.json(r.rows);
-});
-
-// --- ADMIN ---
-app.post('/api/admin/login', async (req,res)=>{
-  const {email,senha} = req.body;
-  const r = await pool.query('SELECT * FROM admins WHERE email=$1',[email]);
-  if(r.rows.length===0) return res.status(400).json({error:'Admin não encontrado'});
-  const admin = r.rows[0];
-  const match = await bcrypt.compare(senha,admin.senha);
-  if(!match) return res.status(400).json({error:'Senha incorreta'});
-  const token = jwt.sign({id:admin.id},JWT_SECRET,{expiresIn:'12h'});
-  res.json({token,admin:{nome:admin.nome,email:admin.email,id:admin.id}});
-});
-
-function authAdmin(req,res,next){
-  const h = req.headers['authorization'];
-  if(!h) return res.status(401).json({error:'Token admin necessário'});
-  const token = h.split(' ')[1];
-  try{
-    const data = jwt.verify(token,JWT_SECRET);
-    req.adminId = data.id;
-    next();
-  }catch(e){
-    res.status(401).json({error:'Token inválido'});
-  }
-}
-
-// Listar clientes
-app.get('/api/admin/clientes', authAdmin, async (req,res)=>{
-  const r = await pool.query('SELECT * FROM clientes ORDER BY criado_em DESC');
-  res.json(r.rows);
-});
-
-// Listar agendamentos
-app.get('/api/admin/agendamentos', authAdmin, async (req,res)=>{
-  const r = await pool.query(
-    `SELECT a.*, s.nome as servico_nome, c.nome as cliente_nome 
-     FROM agendamentos a 
+app.get('/api/agendamentos/meus', authBarbearia, async (req,res)=>{
+  const rows = await pool.query(
+    `SELECT a.*, s.nome as servico_nome, c.nome as cliente_nome
+     FROM agendamentos a
      LEFT JOIN servicos s ON s.id=a.servico_id
      LEFT JOIN clientes c ON c.id=a.cliente_id
-     ORDER BY a.data,a.hora`);
-  res.json(r.rows);
+     WHERE a.barbearia_id=$1`, [req.barbearia_id]
+  );
+  res.json(rows.rows);
 });
 
-// Confirmar/Cancelar
-app.put('/api/admin/agendamentos/:id/confirmar', authAdmin, async (req,res)=>{
+// Atualizar status do agendamento
+app.put('/api/agendamentos/:id/status', authBarbearia, async (req,res)=>{
   const {id} = req.params;
-  await pool.query('UPDATE agendamentos SET status=$1 WHERE id=$2',['confirmado',id]);
-  res.json({ok:true});
+  const {status} = req.body;
+  await pool.query('UPDATE agendamentos SET status=$1 WHERE id=$2 AND barbearia_id=$3', [status,id,req.barbearia_id]);
+  res.json({success:true});
 });
 
-app.put('/api/admin/agendamentos/:id/cancelar', authAdmin, async (req,res)=>{
-  const {id} = req.params;
-  await pool.query('UPDATE agendamentos SET status=$1 WHERE id=$2',['cancelado',id]);
-  res.json({ok:true});
-});
-
-// Rodar servidor
-const PORT = process.env.PORT || 3000;
-app.listen(PORT,()=>console.log(`Servidor rodando na porta ${PORT}`));
+app.listen(process.env.PORT || 3000, ()=>console.log('Backend rodando'));
